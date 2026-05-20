@@ -1,0 +1,207 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1e252b;
+  background: #f3f5f7;
+}
+
+.shell {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 32px auto;
+  display: grid;
+  grid-template-columns: 420px 420px 1fr;
+  gap: 18px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+h1, h2, p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: 24px;
+}
+
+h2 {
+  font-size: 18px;
+  margin-bottom: 0;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  font-weight: 600;
+}
+
+input, select, textarea {
+  width: 100%;
+  border: 1px solid #c8d0d8;
+  border-radius: 6px;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.output-label textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  width: auto;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: #1d6f5f;
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.row, .job-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.row button {
+  background: #344054;
+}
+
+.job {
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #fbfcfd;
+}
+
+.job.succeeded {
+  border-color: #5bb98c;
+}
+
+.job.failed {
+  border-color: #d76666;
+}
+
+.job-head span {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #e9eef2;
+}
+
+.logs {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.log {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.log time {
+  color: #667085;
+}
+
+.log.error, .error {
+  color: #b42318;
+}
+
+.log.warn {
+  color: #996000;
+}
+
+.log.ok {
+  color: #067647;
+}
+
+.empty {
+  color: #667085;
+  margin: 16px 0 0;
+}
+
+.history-section {
+  border-top: 1px solid #d8dee4;
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.success-history {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.success-record {
+  border: 1px solid #b7dfc9;
+  border-radius: 8px;
+  background: #f6fffa;
+  padding: 12px;
+}
+
+.record-head {
+  display: grid;
+  gap: 4px;
+}
+
+.record-head strong {
+  overflow-wrap: anywhere;
+}
+
+.record-head span {
+  color: #667085;
+  font-size: 12px;
+}
+
+
+@media (max-width: 1280px) {
+  .shell {
+    grid-template-columns: 420px 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+}

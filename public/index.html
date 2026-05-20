@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>AutoPlus</title>
+        <link rel="stylesheet" href="/style.css" />
+    </head>
+    <body>
+        <main class="shell">
+            <section class="panel">
+                <header>
+                    <h1>AutoPlus</h1>
+                    <p>
+                        填入 /api/auth/session 的 JSON 应答后创建 Plus
+                        checkout，并按 GuJumpgate/PayPalAutoFiller 的 hosted
+                        PayPal 流程自动填写。
+                    </p>
+                </header>
+                <form id="job-form">
+                    <label>
+                        <span>GPT session JSON</span>
+                        <textarea
+                            name="gptSession"
+                            rows="8"
+                            placeholder='创建 checkout 时粘贴 /api/auth/session 的完整 JSON，例如 {"accessToken":"..."}'
+                        ></textarea>
+                    </label>
+                    <label>
+                        <span>Checkout 链接</span>
+                        <input
+                            name="checkoutUrl"
+                            placeholder="已有链接时填 https://pay.openai.com/c/pay/..."
+                        />
+                    </label>
+                    <div class="grid">
+                        <label
+                            ><span>验证码接收链接</span><input name="smsUrl"
+                        /></label>
+                        <label
+                            ><span>验证码/短信原文</span
+                            ><input
+                                name="smsCode"
+                                placeholder="已有验证码时可直接填 6 位数字或短信原文"
+                        /></label>
+                        <label
+                            ><span>PayPal 电话</span><input name="phone"
+                        /></label>
+                        <label
+                            ><span>卡号</span><input name="cardNumber"
+                        /></label>
+                        <label
+                            ><span>有效期</span><input name="cardExpiry"
+                        /></label>
+                        <label><span>CVV</span><input name="cardCvv" /></label>
+                        <label
+                            ><span>Chrome 路径</span
+                            ><input
+                                name="chromePath"
+                                placeholder="留空自动检测"
+                        /></label>
+                        <label
+                            ><span>CDP 端口</span
+                            ><input
+                                name="cdpPort"
+                                placeholder="复用已打开 Chrome，例如 9222"
+                        /></label>
+                    </div>
+                    <label class="check"
+                        ><input type="checkbox" name="headless" />
+                        <span>无头模式</span></label
+                    >
+                    <label>
+                        <span>PayPal 滑块验证码处理</span>
+                        <select name="captchaMode">
+                            <option value="manual_prompt" selected>
+                                人工验证：弹窗提示并等待完成
+                            </option>
+                            <option value="manual_silent">
+                                人工验证：仅任务日志提示
+                            </option>
+                            <option value="test_assume_solved">测试模式</option>
+                        </select>
+                    </label>
+                    <button type="submit">开始订阅</button>
+                </form>
+            </section>
+            <section class="panel">
+                <header>
+                    <h2>Session 转 Codex JSON</h2>
+                    <p>
+                        本地把 /api/auth/session 应答转换为 Codex session
+                        JSON，不上传到外部服务。
+                    </p>
+                </header>
+                <form id="convert-form">
+                    <label>
+                        <span>GPT session JSON</span>
+                        <textarea
+                            name="gptSession"
+                            rows="8"
+                            placeholder="粘贴包含 accessToken、sessionToken、user、account、expires 的完整 JSON"
+                        ></textarea>
+                    </label>
+                    <button type="submit">转换</button>
+                </form>
+                <label class="output-label">
+                    <span>Codex JSON</span>
+                    <textarea
+                        id="convert-output"
+                        rows="12"
+                        readonly
+                        placeholder="转换结果会显示在这里"
+                    ></textarea>
+                </label>
+            </section>
+            <section class="panel">
+                <header class="row">
+                    <h2>任务</h2>
+                    <button id="refresh" type="button">刷新</button>
+                </header>
+                <div id="jobs" class="jobs"></div>
+                <section class="history-section">
+                    <header class="row">
+                        <h2>成功账号历史</h2>
+                        <button id="clear-history" type="button">清空</button>
+                    </header>
+                    <div id="success-history" class="success-history"></div>
+                </section>
+            </section>
+        </main>
+        <script src="/app.js"></script>
+    </body>
+</html>
