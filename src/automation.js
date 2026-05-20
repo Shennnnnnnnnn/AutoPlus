@@ -32,7 +32,18 @@ import {
   openAiCheckoutStepExpression,
   payPalStepExpression,
   testCaptchaSlideExpression,
+  // 💡 确保你在 page-scripts.js 中也导出了这些新编写的表达式
+  switchToAudioExpression,
+  extractAudioUrlExpression,
+  fillAudioDigitsExpression
 } from "./page-scripts.js";
+
+// 💡 补充火山引擎录音文件识别的常量配置
+const VOLC_APP_ID = "1355349884";
+const VOLC_TOKEN = "UEVjPvFyT8TLpf8ILyTvhHtbMKAMxyRD";
+const VOLC_CLUSTER = "volc_stt_captcha"; 
+const VOLC_SUBMIT_ENDPOINT = "https://openspeech.bytedance.com/api/v1/auc/submit";
+const VOLC_QUERY_ENDPOINT = "https://openspeech.bytedance.com/api/v1/auc/query";
 
 const ADDRESS_ENDPOINT = "https://www.meiguodizhi.com/api/v1/dz";
 
@@ -50,6 +61,39 @@ export class AutoPlusJob {
     this.result = null;
     this.error = "";
     this.browser = null;
+  }
+
+  pause() {
+    if (this.status !== "running") return;
+    this.status = "paused";
+    this.log("任务已被用户手动暂停。", "warn");
+  }
+
+  resume() {
+    if (this.status !== "paused") return;
+    this.status = "running";
+    this.log("任务已被手动恢复，正在继续执行...", "ok");
+  }
+
+  async stop() {
+    if (this.status !== "running" && this.status !== "paused") return;
+    this.status = "stopped";
+    this.log("任务已被用户手动停止。", "warn");
+    if (this.browser) {
+      await this.browser.close().catch(() => {});
+    }
+  }
+
+  async checkPauseAndStop() {
+    if (this.status === "stopped") {
+      throw new Error("任务被手动停止。");
+    }
+    while (this.status === "paused") {
+      await this.sleep(500); // 挂起时每 500ms 检查一次状态
+      if (this.status === "stopped") {
+        throw new Error("任务被手动停止。");
+      }
+    }
   }
 
   log(message, level = "info") {
@@ -73,6 +117,14 @@ export class AutoPlusJob {
   async run() {
     this.status = "running";
     this.log("任务启动：准备解析 GPT session JSON。");
+
+    // 尝试解析 gptSession 提取真实的 GPT 邮箱
+    let gptEmail = "";
+    try {
+      const sessionObj = JSON.parse(this.input.gptSession || "{}");
+      gptEmail = sessionObj?.user?.email || "";
+    } catch {}
+
     try {
       const providedCheckoutUrl = normalizeCheckoutUrl(
         this.input.checkoutUrl || this.input.payOpenAiUrl || "",
@@ -91,7 +143,7 @@ export class AutoPlusJob {
       const checkout = providedCheckoutUrl
         ? this.buildProvidedCheckout(providedCheckoutUrl)
         : await this.createCheckoutFromSessionInput();
-      this.result = { checkout };
+      this.result = { checkout, gptEmail };
       this.log(`Checkout 已创建：${checkout.preferredCheckoutUrl}`);
 
       const address = await this.fetchAddress();
@@ -109,6 +161,11 @@ export class AutoPlusJob {
       this.updatedAt = new Date().toISOString();
       this.log("已检测到 ChatGPT 支付成功回跳，自动订阅流程完成。", "ok");
     } catch (error) {
+      if (this.status === "stopped") {
+        this.error = "任务已被手动停止。";
+        this.updatedAt = new Date().toISOString();
+        return;
+      }
       this.status = "failed";
       this.error = error?.message || String(error);
       this.updatedAt = new Date().toISOString();
@@ -322,10 +379,11 @@ export class AutoPlusJob {
     const deadline = Date.now() + 12 * 60 * 1000;
     let lastAction = "";
     let captchaPrompted = false;
-    let unsupportedAutoCaptchaLogged = false;
     let submittedHostedCheckout = false;
     while (Date.now() < deadline) {
+      await this.checkPauseAndStop();
       await this.waitForPageReady(45000).catch(() => {});
+      await this.checkPauseAndStop();
       const state = (await this.pageState().catch(() => ({}))) || {};
       const url = String(state.url || "");
       if (SUCCESS_URL_RE.test(url) || state.success) {
@@ -346,43 +404,133 @@ export class AutoPlusJob {
         return;
       }
 
+      // 🔥 关键修改点：拦截并处理 DataDome 验证码
       if (state.hasCaptcha) {
         const captchaMode = normalizeCaptchaMode(this.input);
+        
+        // 1. 如果是自动绕过模式 (auto)，执行火山语音识别解法
+        if (captchaMode === "auto") {
+          this.log("检测到 DataDome 验证码，已启动【火山引擎语音识别】全自动绕过方案...", "warn");
+          
+          const appId = String(this.input.volcAppId || VOLC_APP_ID).trim();
+          const token = String(this.input.volcToken || VOLC_TOKEN).trim();
+
+          try {
+            // A. 驱动前端切换到音频验证码模式
+            this.log("正在控制浏览器切换至音频验证组件...");
+            await this.evalDuringNavigation(switchToAudioExpression());
+            await this.sleep(1500); // 等待 DOM 渲染和音频流加载
+            await this.checkPauseAndStop();
+
+            // B. 提取前端产生的 wav 真实下载源
+            const audioUrl = await this.browser.eval(extractAudioUrlExpression());
+            if (!audioUrl || !audioUrl.startsWith("http")) {
+              throw new Error("未能从当前页面截获到有效的音频验证码 URL 轨道。");
+            }
+            this.log(`成功提取验证码音频链接，准备提交至火山转写系统。`);
+
+            // C. 投递任务到火山引擎异步处理网关
+            const submitPayload = {
+              app: { appid: appId, token: token, cluster: VOLC_CLUSTER },
+              user: { uid: `job_${this.id}_${Date.now()}` },
+              audio: { format: "wav", url: audioUrl },
+              additions: { use_itn: "True", use_punc: "False" } // 开启数字归一
+            };
+
+            const submitResponse = await this.fetch(VOLC_SUBMIT_ENDPOINT, {
+              method: "POST",
+              headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer; ${token}`
+              },
+              body: JSON.stringify(submitPayload)
+            });
+            
+            const submitResult = await submitResponse.json().catch(() => ({}));
+            if (!submitResponse.ok || submitResult?.resp?.code !== 1000) {
+              throw new Error(`火山引擎任务提交拒绝: ${submitResult?.resp?.message || '网络异常'}`);
+            }
+
+            const taskId = submitResult.resp.id;
+            this.log(`火山任务创建成功(ID: ${taskId})，进入结果回查队列...`);
+
+            // D. 轮询火山转写 service 状态
+            let captchaDigits = "";
+            const queryPayload = { appid: appId, token: token, cluster: VOLC_CLUSTER, id: taskId };
+            const queryDeadline = Date.now() + 20000; // 最多给语音服务 20 秒处理时间
+            
+            while (Date.now() < queryDeadline) {
+              await this.checkPauseAndStop();
+              await this.sleep(2000); // 遵循文档每 2 秒查一次
+              await this.checkPauseAndStop();
+              const queryResponse = await this.fetch(VOLC_QUERY_ENDPOINT, {
+                method: "POST",
+                headers: { 
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer; ${token}`
+                },
+                body: JSON.stringify(queryPayload)
+              });
+              
+              const queryResult = await queryResponse.json().catch(() => ({}));
+              const taskCode = queryResult?.resp?.code;
+              
+              if (taskCode === 1000) { // 1000 标识识别成功结束
+                const rawText = queryResult.resp.text || "";
+                captchaDigits = rawText.replace(/\D/g, ""); // 清除空格、汉字，保留纯数字
+                break;
+              } else if (taskCode < 2000) { // 小于 2000 代表明确的失败状态码
+                throw new Error(`火山服务端识别终止: ${queryResult?.resp?.message}`);
+              }
+              // 大于等于 2000 属于正在处理或排队，继续循环
+            }
+
+            if (captchaDigits.length !== 6) {
+              throw new Error("火山语音未能在有效时间内解析出标准的 6 位数字验证码。");
+            }
+
+            // E. 将识别出的 6 位数字反向流式注入回浏览器表单并点按提交
+            this.log(`豆包模型识别成功，密码解出: ${captchaDigits}。正在下发按键流...`, "ok");
+            await this.evalDuringNavigation(fillAudioDigitsExpression(captchaDigits));
+            
+            this.log("自动提交完毕，等待风控网关放行页面...");
+            await this.sleep(3000);
+            await this.checkPauseAndStop();
+            continue;
+
+          } catch (audioError) {
+            this.log(`火山语音全自动过码战术失败: ${audioError.message}，正在无缝降级为人工接管。`, "error");
+            // 发生错误时，故意不退出，让它顺延进入下方的人工提示逻辑
+          }
+        }
+
+        // 2. 传统的人工/提示过码模式 (manual_prompt / manual_silent 附近的原始逻辑)
         if (captchaMode === "test_assume_solved" && !isRealPayPalHost(state.host)) {
           this.log("测试模式：正在自动拖动测试页面滑块。", "warn");
           await this.evalDuringNavigation(testCaptchaSlideExpression());
           await this.sleep(500);
+          await this.checkPauseAndStop();
           continue;
         }
-        if (captchaMode === "auto" && !unsupportedAutoCaptchaLogged) {
-          unsupportedAutoCaptchaLogged = true;
-          this.log(
-            "不支持自动完成 PayPal 验证码，已切换为人工验证等待。",
-            "warn",
-          );
-        }
         if (lastAction !== "captcha") {
-          this.log(
-            "检测到 PayPal 验证码，请在浏览器中手动完成验证；验证消失后会自动继续。",
-            "warn",
-          );
+          this.log("检测到 PayPal 验证码，请在浏览器中手动完成验证；验证消失后会自动继续。", "warn");
           lastAction = "captcha";
         }
         if (!captchaPrompted && shouldShowCaptchaPrompt(this.input)) {
           captchaPrompted = true;
           await this.evalDuringNavigation(
-            captchaPromptExpression(
-              "AutoPlus 已暂停：请手动完成 PayPal 验证码，完成后流程会自动继续。",
-            ),
+            captchaPromptExpression("AutoPlus 已暂停：请手动完成 PayPal 验证码，完成后流程会自动继续。")
           );
         }
         await this.sleep(3000);
+        await this.checkPauseAndStop();
         continue;
       }
 
       if (state.verificationInputs >= 6) {
         this.log("检测到验证码输入框，开始轮询短信验证码。");
         const code = await this.pollSmsCode();
+        await this.checkPauseAndStop();
         await this.evalDuringNavigation(fillVerificationExpression(code));
         await this.sleep(1500);
         continue;

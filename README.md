@@ -60,6 +60,7 @@ yes|PayPal: 394662 is your security code. Don't share it.|(PayPal)|到期时间�
 
 `captchaMode` 可选值：
 
+- `auto`：火山引擎语音识别全自动绕过验证码。
 - `manual_prompt`：默认。页面弹窗提示并等待人工完成验证码。
 - `manual_silent`：仅任务日志提示并等待人工完成验证码。
 - `test_assume_solved`：测试模式 `.slider` / `[data-autoplus-test-slider]`

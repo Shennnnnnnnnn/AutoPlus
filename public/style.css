@@ -120,9 +120,110 @@ button:disabled {
 }
 
 .job-head span {
-  border-radius: 999px;
-  padding: 2px 8px;
-  background: #e9eef2;
+  display: none; /* 使用精细化的 status-tag 取代原 span */
+}
+
+/* 控制按钮组与按键样式 */
+.job-controls {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.ctrl-btn {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ctrl-btn.pause-btn {
+  background: #f39c12;
+  color: #fff;
+}
+
+.ctrl-btn.pause-btn:hover:not(:disabled) {
+  background: #e67e22;
+}
+
+.ctrl-btn.resume-btn {
+  background: #27ae60;
+  color: #fff;
+}
+
+.ctrl-btn.resume-btn:hover:not(:disabled) {
+  background: #219653;
+}
+
+.ctrl-btn.stop-btn {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.ctrl-btn.stop-btn:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+/* 精美状态标签 */
+.status-tag {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  display: inline-block;
+}
+
+.status-tag.status-queued {
+  background: #eaecf0;
+  color: #475467;
+}
+
+.status-tag.status-running {
+  background: #e0f2fe;
+  color: #0369a1;
+  animation: pulse-light 2s infinite ease-in-out;
+}
+
+.status-tag.status-paused {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-tag.status-stopped {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-tag.status-succeeded {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-tag.status-failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes pulse-light {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.job.paused {
+  border-color: #f39c12;
+}
+
+.job.stopped {
+  border-color: #e74c3c;
 }
 
 .logs {
@@ -204,4 +305,59 @@ button:disabled {
   .shell {
     grid-template-columns: 1fr;
   }
+}
+
+.volc-config {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px dashed #c8d0d8;
+  border-radius: 8px;
+  background: #fcfdfe;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.volc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: #344054;
+}
+
+.volc-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mini-btn {
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  background: #fff;
+  color: #344054;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mini-btn:hover {
+  background: #f9fafb;
+  border-color: #98a2b3;
+}
+
+.mini-btn.help-btn {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.mini-btn.help-btn:hover {
+  background: #eaecf0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }

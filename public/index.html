@@ -73,7 +73,10 @@
                     <label>
                         <span>PayPal 滑块验证码处理</span>
                         <select name="captchaMode">
-                            <option value="manual_prompt" selected>
+                            <option value="auto" selected>
+                                火山语音识别（自动过码）
+                            </option>
+                            <option value="manual_prompt">
                                 人工验证：弹窗提示并等待完成
                             </option>
                             <option value="manual_silent">
@@ -82,6 +85,26 @@
                             <option value="test_assume_solved">测试模式</option>
                         </select>
                     </label>
+                    <div id="volc-config-section" class="volc-config" style="display: none;">
+                        <div class="volc-header">
+                            <span>火山语音转写认证配置</span>
+                            <div class="volc-actions">
+                                <button type="button" id="btn-volc-activate" class="mini-btn">1. 开通服务</button>
+                                <button type="button" id="btn-volc-auth" class="mini-btn">2. 获取认证</button>
+                                <button type="button" id="btn-volc-help" class="mini-btn help-btn">说明</button>
+                            </div>
+                        </div>
+                        <div class="grid">
+                            <label>
+                                <span>Volc AppID</span>
+                                <input name="volcAppId" placeholder="请输入火山引擎 AppID" />
+                            </label>
+                            <label>
+                                <span>Volc Token</span>
+                                <input name="volcToken" placeholder="请输入火山引擎 Token" />
+                            </label>
+                        </div>
+                    </div>
                     <button type="submit">开始订阅</button>
                 </form>
             </section>

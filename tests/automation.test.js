@@ -20,6 +20,7 @@ class FakeBrowser {
 
   async start() {}
   async enablePage() {}
+  async close() {}
   async navigate(url) {
     this.navigations.push(url);
   }
@@ -314,14 +315,14 @@ test("AutoPlusJob supports silent manual captcha mode without page prompt", asyn
   assert.ok(!browser.evaluations.some((expression) => expression.includes("autoplus-action: captcha-prompt")));
 });
 
-test("AutoPlusJob downgrades unsupported auto captcha mode to manual waiting", async () => {
+test("AutoPlusJob downgrades failed auto captcha mode to manual waiting", async () => {
   const browser = new FakeBrowser();
   browser.states = [
     { url: "https://pay.openai.com/c/pay/cs_test_123", isOpenAiCheckout: true },
     { url: "https://www.paypal.com/checkoutweb/", isPayPal: true, hasCaptcha: true, captchaKind: "datadome" },
     { url: "https://chatgpt.com/payments/success?session_id=cs_test_123", success: true },
   ];
-  const job = new AutoPlusJob("captcha-auto", {
+  const job = new AutoPlusJob("captcha-auto-fallback", {
     gptSession: JSON.stringify(fullAuthSessionResponse()),
     captchaMode: "auto",
   }, {
@@ -334,6 +335,10 @@ test("AutoPlusJob downgrades unsupported auto captcha mode to manual waiting", a
     fetch: async (url) => {
       if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
       if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      // 火山 API 接口返回 500 以模拟转写或网络异常失败
+      if (String(url).includes("openspeech.bytedance.com")) {
+        return textResponse("internal error", 500);
+      }
       throw new Error(`unexpected fetch ${url}`);
     },
     sleep: async () => {},
@@ -342,7 +347,7 @@ test("AutoPlusJob downgrades unsupported auto captcha mode to manual waiting", a
   await job.run();
 
   assert.equal(job.status, "succeeded");
-  assert.ok(job.logs.some((entry) => entry.message.includes("不支持自动完成 PayPal 验证码")));
+  assert.ok(job.logs.some((entry) => entry.message.includes("火山语音全自动过码战术失败")));
   assert.ok(browser.evaluations.some((expression) => expression.includes("autoplus-action: captcha-prompt")));
 });
 
@@ -592,3 +597,79 @@ function textResponse(payload, status = 200) {
     },
   };
 }
+
+test("AutoPlusJob control pause and resume halts and continues execution", async () => {
+  const browser = new FakeBrowser();
+  
+  const job = new AutoPlusJob("pause-resume-test", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    smsUrl: "https://62-us.test/get_sms",
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async (url) => {
+      if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
+      if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      if (String(url).includes("62-us.test")) {
+        return textResponse("yes|PayPal: 394662 is your security code.");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    sleep: async () => {},
+  });
+
+  // 启动任务并让其在后台运行
+  const runPromise = job.run();
+  
+  // 触发暂停，并断言状态为 paused
+  job.pause();
+  assert.equal(job.status, "paused");
+  
+  // 触发恢复，并断言状态重新为 running
+  job.resume();
+  assert.equal(job.status, "running");
+  
+  await runPromise;
+  assert.equal(job.status, "succeeded");
+  assert.equal(job.result.gptEmail, "user@example.com"); // 验证正确解析了 gptSession 中的真实 email
+});
+
+test("AutoPlusJob control stop halts execution immediately", async () => {
+  const browser = new FakeBrowser();
+  
+  const job = new AutoPlusJob("stop-test", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    smsUrl: "https://62-us.test/get_sms",
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async (url) => {
+      if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
+      if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      if (String(url).includes("62-us.test")) {
+        return textResponse("yes|PayPal: 394662 is your security code.");
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    sleep: async () => {},
+  });
+
+  // 启动任务并让其在后台运行
+  const runPromise = job.run();
+  
+  // 触发停止，并断言状态为 stopped
+  await job.stop();
+  assert.equal(job.status, "stopped");
+  
+  // 确保 run() 正常返回，不会因为被停止而对外抛出异常
+  await runPromise;
+  assert.equal(job.status, "stopped");
+});

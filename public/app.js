@@ -17,6 +17,8 @@ const CACHEABLE_FIELDS = [
   "cdpPort",
   "captchaMode",
   "headless",
+  "volcAppId",
+  "volcToken",
 ];
 
 async function json(url, options) {
@@ -35,6 +37,7 @@ async function loadConfig() {
     else field.value = value || "";
   }
   restoreFormCache();
+  toggleVolcSection();
 }
 
 function readFormCache() {
@@ -85,7 +88,8 @@ function writeSuccessHistory(records) {
 
 function successRecordFromJob(job) {
   const profile = job.result?.profile || {};
-  const email = String(profile.email || "").trim();
+  // 💡 优先使用 gptSession 中提取到的真实邮箱记录
+  const email = String(job.result?.gptEmail || profile.email || "").trim();
   if (!email) return null;
   return {
     id: email,
@@ -127,8 +131,32 @@ function renderJob(job) {
   const checkout = job.result?.checkout?.preferredCheckoutUrl
     ? `<a href="${job.result.checkout.preferredCheckoutUrl}" target="_blank" rel="noreferrer">checkout</a>`
     : "";
+
+  // 💡 渲染任务控制按钮组
+  let controls = "";
+  if (job.status === "running") {
+    controls = `
+      <div class="job-controls">
+        <button class="ctrl-btn pause-btn" data-id="${job.id}" data-action="pause">暂停</button>
+        <button class="ctrl-btn stop-btn" data-id="${job.id}" data-action="stop">停止</button>
+      </div>
+    `;
+  } else if (job.status === "paused") {
+    controls = `
+      <div class="job-controls">
+        <button class="ctrl-btn resume-btn" data-id="${job.id}" data-action="resume">恢复</button>
+        <button class="ctrl-btn stop-btn" data-id="${job.id}" data-action="stop">停止</button>
+      </div>
+    `;
+  }
+
   return `<article class="job ${job.status}">
-    <div class="job-head"><strong>#${job.id}</strong><span>${job.status}</span>${checkout}</div>
+    <div class="job-head">
+      <strong>#${job.id}</strong>
+      <span class="status-tag status-${job.status}">${job.status}</span>
+      ${checkout}
+    </div>
+    ${controls}
     ${job.error ? `<p class="error">${escapeHtml(job.error)}</p>` : ""}
     <div class="logs">${logs}</div>
   </article>`;
@@ -199,3 +227,49 @@ clearHistory.addEventListener("click", () => {
 renderSuccessHistory();
 loadConfig().then(loadJobs);
 setInterval(loadJobs, 3000);
+
+const captchaModeSelect = form.elements.captchaMode;
+const volcSection = document.getElementById("volc-config-section");
+
+function toggleVolcSection() {
+  if (captchaModeSelect && volcSection) {
+    volcSection.style.display = captchaModeSelect.value === "auto" ? "block" : "none";
+  }
+}
+
+if (captchaModeSelect) {
+  captchaModeSelect.addEventListener("change", toggleVolcSection);
+}
+
+document.getElementById("btn-volc-activate")?.addEventListener("click", () => {
+  window.open("https://console.volcengine.com/speech/new/setting/activate?projectName=default", "_blank");
+});
+document.getElementById("btn-volc-auth")?.addEventListener("click", () => {
+  window.open("https://console.volcengine.com/speech/service/17", "_blank");
+});
+document.getElementById("btn-volc-help")?.addEventListener("click", () => {
+  alert("说明：开通「小模型-录音文件识别」后，进入服务即可获取对应的 AppID 和 Token 等接口认证信息。");
+});
+
+// 💡 控制按钮事件委托监听
+jobsEl.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!target.classList.contains("ctrl-btn")) return;
+  const jobId = target.getAttribute("data-id");
+  const action = target.getAttribute("data-action");
+  if (!jobId || !action) return;
+
+  target.disabled = true;
+  try {
+    await json(`/api/jobs/${jobId}/control`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    await loadJobs();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    target.disabled = false;
+  }
+});

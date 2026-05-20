@@ -98,6 +98,25 @@ const server = http.createServer(async (req, res) => {
       if (!job) return sendJson(res, 404, { error: "任务不存在。" });
       return sendJson(res, 200, job.snapshot());
     }
+    const controlMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/control$/);
+    if (req.method === "POST" && controlMatch) {
+      const job = jobs.get(controlMatch[1]);
+      if (!job) return sendJson(res, 404, { error: "任务不存在。" });
+      const { action } = await readJson(req);
+      if (action === "pause") {
+        job.pause();
+        return sendJson(res, 200, job.snapshot());
+      }
+      if (action === "resume") {
+        job.resume();
+        return sendJson(res, 200, job.snapshot());
+      }
+      if (action === "stop") {
+        await job.stop();
+        return sendJson(res, 200, job.snapshot());
+      }
+      return sendJson(res, 400, { error: "无效的 control 动作。" });
+    }
     sendJson(res, 404, { error: "not_found" });
   } catch (error) {
     sendJson(res, 500, { error: error?.message || String(error) });

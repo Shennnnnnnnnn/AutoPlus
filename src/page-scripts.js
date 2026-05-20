@@ -290,3 +290,47 @@ export function payPalStepExpression(profileJson) {
 })()
 `;
 }
+
+// 1. 点击切换到音频模式的表达式
+export function switchToAudioExpression() {
+  return `(() => {
+    const audioBtn = document.getElementById('captcha__audio__button');
+    const audioBlock = document.getElementById('captcha__audio');
+    if (audioBtn && audioBlock && !audioBlock.classList.contains('toggled')) {
+      audioBtn.click();
+      return true;
+    }
+    return false;
+  })()`;
+}
+
+// 2. 提取当前音频 URL 的表达式
+export function extractAudioUrlExpression() {
+  return `(() => {
+    const audioTrack = document.querySelector('.audio-captcha-track');
+    return audioTrack ? audioTrack.src : null;
+  })()`;
+}
+
+// 3. 异步流式注入 6 位验证码并触发点击的表达式
+export function fillAudioDigitsExpression(digits) {
+  return `(async (code) => {
+    const inputs = document.querySelectorAll('.audio-captcha-input-container input, .audio-captcha-inputs');
+    const submitBtn = document.querySelector('.audio-captcha-submit-button');
+    if (inputs.length !== 6 || !submitBtn) return false;
+
+    for (let i = 0; i < 6; i++) {
+      const field = inputs[i];
+      field.focus();
+      field.value = code[i];
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 90)); // 仿生人手按键延迟
+    }
+    submitBtn.focus();
+    submitBtn.removeAttribute('disabled');
+    await new Promise(r => setTimeout(r, 200));
+    submitBtn.click();
+    return true;
+  })('${digits}')`;
+}
