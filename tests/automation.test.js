@@ -743,3 +743,120 @@ test("AutoPlusJob successfully extracts 6 digits using whisper", async () => {
   assert.ok(job.logs.some((entry) => entry.message.includes("本地识别成功，解出数字: 654321")));
   assert.ok(browser.evaluations.some((expression) => expression.includes("654321")));
 });
+
+test("AutoPlusJob run in non-headless mode closes the browser upon completion", async () => {
+  let closeCalled = false;
+  const browser = new FakeBrowser();
+  browser.close = async () => {
+    closeCalled = true;
+  };
+
+  const job = new AutoPlusJob("non-headless-success", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    smsUrl: "https://62-us.test/get_sms",
+    headless: false, // 显式使用有头（非无头）模式
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async (url) => {
+      if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
+      if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      if (String(url).includes("62-us.test")) return textResponse("yes|PayPal: 394662 is your security code.");
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    sleep: async () => {},
+  });
+
+  await job.run();
+  assert.equal(job.status, "succeeded");
+  assert.ok(closeCalled); // 验证已关闭浏览器
+});
+
+test("AutoPlusJob run in non-headless mode closes the browser upon failure", async () => {
+  let closeCalled = false;
+  const browser = new FakeBrowser();
+  browser.close = async () => {
+    closeCalled = true;
+  };
+
+  const job = new AutoPlusJob("non-headless-failure", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    smsUrl: "https://62-us.test/get_sms",
+    headless: false, // 显式使用有头（非无头）模式
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async () => {
+      throw new Error("Simulated network failure");
+    },
+    sleep: async () => {},
+  });
+
+  await assert.rejects(() => job.run(), /Simulated network failure/);
+  assert.equal(job.status, "failed");
+  assert.ok(closeCalled); // 验证失败时也已关闭浏览器
+});
+
+test("AutoPlusJob successfully extracts 6 digits using whisper from Chinese numerals with separators", async () => {
+  const browser = new FakeBrowser();
+  browser.states = [
+    { url: "https://pay.openai.com/c/pay/cs_test_123", isOpenAiCheckout: true },
+    { url: "https://www.paypal.com/checkoutweb/", isPayPal: true, hasCaptcha: true, captchaKind: "datadome" },
+    { url: "https://chatgpt.com/payments/success?session_id=cs_test_123", success: true },
+  ];
+  
+  const job = new AutoPlusJob("captcha-auto-chinese-success", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    captchaMode: "auto",
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async (url) => {
+      if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
+      if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      if (String(url).includes("mock.wav")) {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("mock wave body");
+          }
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    exec: (cmd, callback) => {
+      const match = cmd.match(/"([^"]+\.wav)"/);
+      if (match) {
+        const wavPath = match[1];
+        const tempDir = path.dirname(wavPath);
+        const baseName = path.basename(wavPath, ".wav");
+        const txtPath = path.join(tempDir, baseName + ".txt");
+        // 模拟转写出来的是带有顿号、空格和中文数字汉字的复杂字符串
+        fs.writeFileSync(txtPath, "识别出的数字发音为： 三、九、四、 六、六、二  。");
+      }
+      callback(null, "whisper transcription finished", "");
+    },
+    sleep: async () => {},
+  });
+
+  await job.run();
+
+  assert.equal(job.status, "succeeded");
+  assert.ok(job.logs.some((entry) => entry.message.includes("本地识别成功，解出数字: 394662")));
+  assert.ok(browser.evaluations.some((expression) => expression.includes("394662")));
+});
+
+

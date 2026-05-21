@@ -170,6 +170,12 @@ export class AutoPlusJob {
       this.updatedAt = new Date().toISOString();
       this.log(`任务失败：${this.error}`, "error");
       throw error;
+    } finally {
+      // 若没有使用无头模式执行，在执行失败、成功或手动停止时关闭新打开的 Chrome 浏览器
+      const isHeadless = Boolean(this.input.headless ?? DEFAULTS.headless);
+      if (!isHeadless && this.browser) {
+        await this.browser.close().catch(() => {});
+      }
     }
   }
 
@@ -442,13 +448,13 @@ export class AutoPlusJob {
             }
             this.log(`成功提取音频链接，准备下载到本地进行识别。`);
 
-            // 下载音频并保存至本地临时目录
+            // 下载音频并保存至 /tmp 临时目录以方便排查与分析
             const audioRes = await this.fetch(audioUrl);
             if (!audioRes.ok) {
               throw new Error(`音频文件下载失败，HTTP 状态码: ${audioRes.status}`);
             }
             const buffer = Buffer.from(await audioRes.arrayBuffer());
-            const tempDir = os.tmpdir();
+            const tempDir = "/tmp";
             tempWavPath = path.join(tempDir, `audio_${crypto.randomBytes(8).toString("hex")}.wav`);
             await fs.promises.writeFile(tempWavPath, buffer);
             this.log("音频下载成功，启动本地语音识别分析...");
@@ -480,12 +486,26 @@ export class AutoPlusJob {
 
             const txtContent = await fs.promises.readFile(txtPath, "utf8");
             
-            const match = txtContent.match(/\b(\d{6})\b/);
+            // 将文本中的中文数字（如：三、九）转换为阿拉伯数字，以支持 Whisper 可能转写出的中文大写数字
+            const chineseToDigits = (text) => {
+              const map = {
+                "零": "0", "〇": "0", "一": "1", "二": "2", "两": "2", "三": "3", "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9"
+              };
+              return text.split("").map(c => map[c] || c).join("");
+            };
+
+            const convertedText = chineseToDigits(txtContent);
+            // 过滤掉可能存在的各种分隔符和空格（如：顿号、空格、逗号等）
+            const cleanedText = convertedText.replace(/[\s,，.。、\-]+/g, "");
+            const match = cleanedText.match(/\d{6}/);
             if (!match) {
+              // 发生提取错误时，在 Job Log 中详细打印识别的原始文本，并保留文件，绝不“盲猜”
+              this.log(`[语音识别调试] 提取验证码失败。原始文本为: "${txtContent.trim()}"，过滤清洁后为: "${cleanedText}"，临时文本路径为: "${txtPath}"`, "error");
+              this._keepAudioDebugFiles = true;
               throw new Error("未能从本地语音分析文本中提取到 6 位数字组合。");
             }
 
-            const digits = match[1];
+            const digits = match[0];
             this.log(`本地识别成功，解出数字: ${digits}。正在下发按键流...`, "ok");
             await this.evalDuringNavigation(fillAudioDigitsExpression(digits), contextId);
             
@@ -497,12 +517,12 @@ export class AutoPlusJob {
           } catch (audioError) {
             this.log(`全自动语音提取方案失败: ${audioError.message}，正在无缝降级为人工接管。`, "error");
           } finally {
-            if (tempWavPath) {
+            if (tempWavPath && !this._keepAudioDebugFiles) {
               try {
                 await fs.promises.unlink(tempWavPath);
               } catch {}
               try {
-                const tempDir = os.tmpdir();
+                const tempDir = "/tmp";
                 const baseNameWithWav = path.basename(tempWavPath);
                 const baseNameWithoutWav = path.basename(tempWavPath, ".wav");
                 const exts = [".txt", ".srt", ".vtt", ".tsv", ".json"];
@@ -511,6 +531,9 @@ export class AutoPlusJob {
                   await fs.promises.unlink(path.join(tempDir, baseNameWithoutWav + ext)).catch(() => {});
                 }
               } catch {}
+            } else if (this._keepAudioDebugFiles) {
+              this.log(`[语音识别调试] 提取失败，已专门为您保留该次失败的临时转写文件，音频路径: "${tempWavPath}"`, "warn");
+              this._keepAudioDebugFiles = false; // 重置标志
             }
           }
         }
