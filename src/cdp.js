@@ -23,6 +23,7 @@ export class CdpBrowser {
     this.ws = null;
     this.nextId = 1;
     this.pending = new Map();
+    this.contexts = new Map();
   }
 
   async start() {
@@ -85,6 +86,16 @@ export class CdpBrowser {
     if (payload.method === "Target.attachedToTarget") {
       this.sessionId = payload.params.sessionId;
     }
+    if (payload.method === "Runtime.executionContextCreated") {
+      const ctx = payload.params.context;
+      this.contexts.set(ctx.id, ctx);
+    }
+    if (payload.method === "Runtime.executionContextDestroyed") {
+      this.contexts.delete(payload.params.executionContextId);
+    }
+    if (payload.method === "Runtime.executionContextsCleared") {
+      this.contexts.clear();
+    }
     if (!payload.id) return;
     const pending = this.pending.get(payload.id);
     if (!pending) return;
@@ -128,13 +139,26 @@ export class CdpBrowser {
     await this.send("Page.navigate", { url });
   }
 
-  async eval(expression, awaitPromise = true) {
-    const result = await this.send("Runtime.evaluate", {
+  findContextIdByOrigin(originPart) {
+    for (const [id, ctx] of this.contexts.entries()) {
+      if (ctx.origin && ctx.origin.includes(originPart)) {
+        return id;
+      }
+    }
+    return null;
+  }
+
+  async eval(expression, awaitPromise = true, contextId = undefined) {
+    const options = {
       expression,
       awaitPromise,
       returnByValue: true,
       userGesture: true,
-    });
+    };
+    if (contextId !== undefined) {
+      options.contextId = contextId;
+    }
+    const result = await this.send("Runtime.evaluate", options);
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.text || "页面脚本执行失败。");
     }

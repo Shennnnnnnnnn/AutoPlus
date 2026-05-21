@@ -416,14 +416,30 @@ export class AutoPlusJob {
           const token = String(this.input.volcToken || VOLC_TOKEN).trim();
 
           try {
+            // 💡 等待并定位属于 DataDome 的 iframe 的 executionContextId
+            let contextId = null;
+            const searchDeadline = Date.now() + 5000; // 最多等 5 秒让 context 创建
+            while (Date.now() < searchDeadline) {
+              if (this.browser.findContextIdByOrigin) {
+                contextId = this.browser.findContextIdByOrigin("ddc.paypal.com");
+              }
+              if (contextId) break;
+              await this.sleep(250);
+              await this.checkPauseAndStop();
+            }
+            if (!contextId) {
+              throw new Error("未能定位到有效的 DataDome 验证码 iframe 执行上下文。");
+            }
+            this.log(`成功定位验证码 iframe 执行上下文（ContextID: ${contextId}）。`);
+
             // A. 驱动前端切换到音频验证码模式
             this.log("正在控制浏览器切换至音频验证组件...");
-            await this.evalDuringNavigation(switchToAudioExpression());
+            await this.evalDuringNavigation(switchToAudioExpression(), contextId);
             await this.sleep(1500); // 等待 DOM 渲染和音频流加载
             await this.checkPauseAndStop();
 
             // B. 提取前端产生的 wav 真实下载源
-            const audioUrl = await this.browser.eval(extractAudioUrlExpression());
+            const audioUrl = await this.browser.eval(extractAudioUrlExpression(), true, contextId);
             if (!audioUrl || !audioUrl.startsWith("http")) {
               throw new Error("未能从当前页面截获到有效的音频验证码 URL 轨道。");
             }
@@ -491,7 +507,7 @@ export class AutoPlusJob {
 
             // E. 将识别出的 6 位数字反向流式注入回浏览器表单并点按提交
             this.log(`豆包模型识别成功，密码解出: ${captchaDigits}。正在下发按键流...`, "ok");
-            await this.evalDuringNavigation(fillAudioDigitsExpression(captchaDigits));
+            await this.evalDuringNavigation(fillAudioDigitsExpression(captchaDigits), contextId);
             
             this.log("自动提交完毕，等待风控网关放行页面...");
             await this.sleep(3000);
@@ -572,9 +588,9 @@ export class AutoPlusJob {
     throw new Error("自动订阅流程超时，未检测到支付成功回跳。");
   }
 
-  async evalDuringNavigation(expression) {
+  async evalDuringNavigation(expression, contextId = undefined) {
     try {
-      return await this.browser.eval(expression);
+      return await this.browser.eval(expression, true, contextId);
     } catch (error) {
       if (!isRecoverableNavigationError(error)) throw error;
       this.log("页面正在跳转，等待新页面加载后继续。", "warn");
