@@ -463,8 +463,10 @@ export class AutoPlusJob {
             });
             
             const submitResult = await submitResponse.json().catch(() => ({}));
-            if (!submitResponse.ok || submitResult?.resp?.code !== 1000) {
-              throw new Error(`火山引擎任务提交拒绝: ${submitResult?.resp?.message || '网络异常'}`);
+            if (!submitResponse.ok || (submitResult?.resp && submitResult.resp.code !== 1000) || (submitResult?.code !== undefined && submitResult.code !== 1000)) {
+              const errorReason = submitResult?.resp?.message || submitResult?.message || `HTTP ${submitResponse.status}`;
+              const errCode = submitResult?.resp?.code || submitResult?.code || submitResponse.status;
+              throw new Error(`火山引擎任务提交拒绝: ${errorReason} (错误/状态码: ${errCode})`);
             }
 
             const taskId = submitResult.resp.id;
@@ -489,14 +491,19 @@ export class AutoPlusJob {
               });
               
               const queryResult = await queryResponse.json().catch(() => ({}));
-              const taskCode = queryResult?.resp?.code;
+              if (!queryResponse.ok) {
+                const errorReason = queryResult?.resp?.message || queryResult?.message || `HTTP ${queryResponse.status}`;
+                throw new Error(`火山服务端查询失败: ${errorReason} (状态码: ${queryResponse.status})`);
+              }
+              const taskCode = queryResult?.resp?.code !== undefined ? queryResult.resp.code : queryResult?.code;
               
-              if (taskCode === 1000) { // 1000 标识识别成功结束
+              if (taskCode === 1000 && queryResult?.resp) { // 1000 标识识别成功结束
                 const rawText = queryResult.resp.text || "";
                 captchaDigits = rawText.replace(/\D/g, ""); // 清除空格、汉字，保留纯数字
                 break;
-              } else if (taskCode < 2000) { // 小于 2000 代表明确的失败状态码
-                throw new Error(`火山服务端识别终止: ${queryResult?.resp?.message}`);
+              } else if (taskCode !== undefined && taskCode < 2000) { // 小于 2000 代表明确的失败状态码
+                const errMsg = queryResult?.resp?.message || queryResult?.message || "未知原因";
+                throw new Error(`火山服务端识别终止: ${errMsg} (错误码: ${taskCode})`);
               }
               // 大于等于 2000 属于正在处理或排队，继续循环
             }
