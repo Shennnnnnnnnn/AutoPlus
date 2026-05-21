@@ -1,3 +1,8 @@
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
+import { exec } from "node:child_process";
+import crypto from "node:crypto";
 import {
   brotliDecompressSync,
   gunzipSync,
@@ -38,13 +43,6 @@ import {
   fillAudioDigitsExpression
 } from "./page-scripts.js";
 
-// 💡 补充火山引擎录音文件识别的常量配置
-const VOLC_APP_ID = "1355349884";
-const VOLC_TOKEN = "UEVjPvFyT8TLpf8ILyTvhHtbMKAMxyRD";
-const VOLC_CLUSTER = "volc_stt_captcha"; 
-const VOLC_SUBMIT_ENDPOINT = "https://openspeech.bytedance.com/api/v1/auc/submit";
-const VOLC_QUERY_ENDPOINT = "https://openspeech.bytedance.com/api/v1/auc/query";
-
 const ADDRESS_ENDPOINT = "https://www.meiguodizhi.com/api/v1/dz";
 
 export class AutoPlusJob {
@@ -54,6 +52,7 @@ export class AutoPlusJob {
     this.Browser = dependencies.Browser || CdpBrowser;
     this.fetch = dependencies.fetch || createProxyAwareFetch();
     this.sleep = dependencies.sleep || sleep;
+    this.exec = dependencies.exec || exec;
     this.status = "queued";
     this.createdAt = new Date().toISOString();
     this.updatedAt = this.createdAt;
@@ -408,17 +407,15 @@ export class AutoPlusJob {
       if (state.hasCaptcha) {
         const captchaMode = normalizeCaptchaMode(this.input);
         
-        // 1. 如果是自动绕过模式 (auto)，执行火山语音识别解法
+        // 1. 如果是自动绕过模式 (auto)，执行本地语音识别方案
         if (captchaMode === "auto") {
-          this.log("检测到 DataDome 验证码，已启动【火山引擎语音识别】全自动绕过方案...", "warn");
+          this.log("检测到音频组件，已启动【本地语音提取】全自动处理方案...", "warn");
           
-          const appId = String(this.input.volcAppId || VOLC_APP_ID).trim();
-          const token = String(this.input.volcToken || VOLC_TOKEN).trim();
-
+          let tempWavPath = "";
           try {
-            // 💡 等待并定位属于 DataDome 的 iframe 的 executionContextId
+            // 定位属于音频验证的 iframe 执行上下文
             let contextId = null;
-            const searchDeadline = Date.now() + 5000; // 最多等 5 秒让 context 创建
+            const searchDeadline = Date.now() + 5000;
             while (Date.now() < searchDeadline) {
               if (this.browser.findContextIdByOrigin) {
                 contextId = this.browser.findContextIdByOrigin("ddc.paypal.com");
@@ -428,102 +425,93 @@ export class AutoPlusJob {
               await this.checkPauseAndStop();
             }
             if (!contextId) {
-              throw new Error("未能定位到有效的 DataDome 验证码 iframe 执行上下文。");
+              throw new Error("未能定位到有效的音频提取执行上下文。");
             }
-            this.log(`成功定位验证码 iframe 执行上下文（ContextID: ${contextId}）。`);
+            this.log(`成功定位执行上下文（ContextID: ${contextId}）。`);
 
-            // A. 驱动前端切换到音频验证码模式
-            this.log("正在控制浏览器切换至音频验证组件...");
+            // 驱动前端切换到音频验证模式
+            this.log("正在控制浏览器切换至音频组件...");
             await this.evalDuringNavigation(switchToAudioExpression(), contextId);
-            await this.sleep(1500); // 等待 DOM 渲染和音频流加载
+            await this.sleep(1500);
             await this.checkPauseAndStop();
 
-            // B. 提取前端产生的 wav 真实下载源
+            // 提取前端产生的音频真实下载源
             const audioUrl = await this.browser.eval(extractAudioUrlExpression(), true, contextId);
             if (!audioUrl || !audioUrl.startsWith("http")) {
-              throw new Error("未能从当前页面截获到有效的音频验证码 URL 轨道。");
+              throw new Error("未能从当前页面截获到有效的音频链接。");
             }
-            this.log(`成功提取验证码音频链接，准备提交至火山转写系统。`);
+            this.log(`成功提取音频链接，准备下载到本地进行识别。`);
 
-            // C. 投递任务到火山引擎异步处理网关
-            const submitPayload = {
-              app: { appid: appId, token: token, cluster: VOLC_CLUSTER },
-              user: { uid: `job_${this.id}_${Date.now()}` },
-              audio: { format: "wav", url: audioUrl },
-              additions: { use_itn: "True", use_punc: "False" } // 开启数字归一
-            };
-
-            const submitResponse = await this.fetch(VOLC_SUBMIT_ENDPOINT, {
-              method: "POST",
-              headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer; ${token}`
-              },
-              body: JSON.stringify(submitPayload)
-            });
-            
-            const submitResult = await submitResponse.json().catch(() => ({}));
-            if (!submitResponse.ok || (submitResult?.resp && submitResult.resp.code !== 1000) || (submitResult?.code !== undefined && submitResult.code !== 1000)) {
-              const errorReason = submitResult?.resp?.message || submitResult?.message || `HTTP ${submitResponse.status}`;
-              const errCode = submitResult?.resp?.code || submitResult?.code || submitResponse.status;
-              throw new Error(`火山引擎任务提交拒绝: ${errorReason} (错误/状态码: ${errCode})`);
+            // 下载音频并保存至本地临时目录
+            const audioRes = await this.fetch(audioUrl);
+            if (!audioRes.ok) {
+              throw new Error(`音频文件下载失败，HTTP 状态码: ${audioRes.status}`);
             }
+            const buffer = Buffer.from(await audioRes.arrayBuffer());
+            const tempDir = os.tmpdir();
+            tempWavPath = path.join(tempDir, `audio_${crypto.randomBytes(8).toString("hex")}.wav`);
+            await fs.promises.writeFile(tempWavPath, buffer);
+            this.log("音频下载成功，启动本地语音识别分析...");
 
-            const taskId = submitResult.resp.id;
-            this.log(`火山任务创建成功(ID: ${taskId})，进入结果回查队列...`);
+            // 从用户输入动态读取 Whisper 执行路径，若未填则默认为全局系统指令
+            const whisperPath = String(this.input.whisperPath || "").trim() || "whisper";
+            const whisperCmd = `"${whisperPath}" "${tempWavPath}" --language zh --model base --output_dir "${tempDir}"`;
 
-            // D. 轮询火山转写 service 状态
-            let captchaDigits = "";
-            const queryPayload = { appid: appId, token: token, cluster: VOLC_CLUSTER, id: taskId };
-            const queryDeadline = Date.now() + 20000; // 最多给语音服务 20 秒处理时间
-            
-            while (Date.now() < queryDeadline) {
-              await this.checkPauseAndStop();
-              await this.sleep(2000); // 遵循文档每 2 秒查一次
-              await this.checkPauseAndStop();
-              const queryResponse = await this.fetch(VOLC_QUERY_ENDPOINT, {
-                method: "POST",
-                headers: { 
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer; ${token}`
-                },
-                body: JSON.stringify(queryPayload)
+            const execPromise = (cmd) => new Promise((resolve, reject) => {
+              this.exec(cmd, (error, stdout, stderr) => {
+                if (error) reject(error);
+                else resolve(stdout);
               });
-              
-              const queryResult = await queryResponse.json().catch(() => ({}));
-              if (!queryResponse.ok) {
-                const errorReason = queryResult?.resp?.message || queryResult?.message || `HTTP ${queryResponse.status}`;
-                throw new Error(`火山服务端查询失败: ${errorReason} (状态码: ${queryResponse.status})`);
-              }
-              const taskCode = queryResult?.resp?.code !== undefined ? queryResult.resp.code : queryResult?.code;
-              
-              if (taskCode === 1000 && queryResult?.resp) { // 1000 标识识别成功结束
-                const rawText = queryResult.resp.text || "";
-                captchaDigits = rawText.replace(/\D/g, ""); // 清除空格、汉字，保留纯数字
-                break;
-              } else if (taskCode !== undefined && taskCode < 2000) { // 小于 2000 代表明确的失败状态码
-                const errMsg = queryResult?.resp?.message || queryResult?.message || "未知原因";
-                throw new Error(`火山服务端识别终止: ${errMsg} (错误码: ${taskCode})`);
-              }
-              // 大于等于 2000 属于正在处理或排队，继续循环
-            }
+            });
 
-            if (captchaDigits.length !== 6) {
-              throw new Error("火山语音未能在有效时间内解析出标准的 6 位数字验证码。");
-            }
+            await execPromise(whisperCmd);
+            this.log("本地语音分析完成，正在读取转写文本...");
 
-            // E. 将识别出的 6 位数字反向流式注入回浏览器表单并点按提交
-            this.log(`豆包模型识别成功，密码解出: ${captchaDigits}。正在下发按键流...`, "ok");
-            await this.evalDuringNavigation(fillAudioDigitsExpression(captchaDigits), contextId);
+            // 读取转写结果并检索其中的 6 位阿拉伯数字组合（兼容以 .wav.txt 与 .txt 结尾的转写文件名）
+            const txtPath1 = tempWavPath + ".txt";
+            const txtPath2 = path.join(tempDir, path.basename(tempWavPath, ".wav") + ".txt");
             
-            this.log("自动提交完毕，等待风控网关放行页面...");
+            let txtPath = txtPath1;
+            try {
+              await fs.promises.access(txtPath1);
+            } catch {
+              txtPath = txtPath2;
+            }
+
+            const txtContent = await fs.promises.readFile(txtPath, "utf8");
+            
+            const match = txtContent.match(/\b(\d{6})\b/);
+            if (!match) {
+              throw new Error("未能从本地语音分析文本中提取到 6 位数字组合。");
+            }
+
+            const digits = match[1];
+            this.log(`本地识别成功，解出数字: ${digits}。正在下发按键流...`, "ok");
+            await this.evalDuringNavigation(fillAudioDigitsExpression(digits), contextId);
+            
+            this.log("自动提交完毕，等待放行页面...");
             await this.sleep(3000);
             await this.checkPauseAndStop();
             continue;
 
           } catch (audioError) {
-            this.log(`火山语音全自动过码战术失败: ${audioError.message}，正在无缝降级为人工接管。`, "error");
-            // 发生错误时，故意不退出，让它顺延进入下方的人工提示逻辑
+            this.log(`全自动语音提取方案失败: ${audioError.message}，正在无缝降级为人工接管。`, "error");
+          } finally {
+            if (tempWavPath) {
+              try {
+                await fs.promises.unlink(tempWavPath);
+              } catch {}
+              try {
+                const tempDir = os.tmpdir();
+                const baseNameWithWav = path.basename(tempWavPath);
+                const baseNameWithoutWav = path.basename(tempWavPath, ".wav");
+                const exts = [".txt", ".srt", ".vtt", ".tsv", ".json"];
+                for (const ext of exts) {
+                  await fs.promises.unlink(path.join(tempDir, baseNameWithWav + ext)).catch(() => {});
+                  await fs.promises.unlink(path.join(tempDir, baseNameWithoutWav + ext)).catch(() => {});
+                }
+              } catch {}
+            }
           }
         }
 
@@ -536,13 +524,13 @@ export class AutoPlusJob {
           continue;
         }
         if (lastAction !== "captcha") {
-          this.log("检测到 PayPal 验证码，请在浏览器中手动完成验证；验证消失后会自动继续。", "warn");
+          this.log("检测到安全验证，请在浏览器中手动完成；验证消失后会自动继续。", "warn");
           lastAction = "captcha";
         }
         if (!captchaPrompted && shouldShowCaptchaPrompt(this.input)) {
           captchaPrompted = true;
           await this.evalDuringNavigation(
-            captchaPromptExpression("AutoPlus 已暂停：请手动完成 PayPal 验证码，完成后流程会自动继续。")
+            captchaPromptExpression("AutoPlus 已暂停：请手动完成验证，完成后流程会自动继续。")
           );
         }
         await this.sleep(3000);

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { brotliCompressSync, gzipSync, zstdCompressSync } from "node:zlib";
+import fs from "node:fs";
+import path from "node:path";
 import { AutoPlusJob } from "../src/automation.js";
 
 class FakeBrowser {
@@ -24,10 +26,16 @@ class FakeBrowser {
   async navigate(url) {
     this.navigations.push(url);
   }
+  findContextIdByOrigin(origin) {
+    return 42;
+  }
   async eval(expression) {
     this.evaluations.push(expression);
     if (expression === "document.readyState") return "complete";
     if (expression === "window.AutoPlus.state()") return this.states.shift() || this.states.at(-1);
+    if (expression.includes("audio-captcha-track")) {
+      return "https://dd.prod.ddc.paypal.com/audio/mock.wav";
+    }
     if (expression.includes("autoplus-action: openai-checkout") && this.failOpenAiCheckoutOnce) {
       this.failOpenAiCheckoutOnce = false;
       throw new Error("Inspected target navigated or closed");
@@ -274,7 +282,7 @@ test("AutoPlusJob pauses on PayPal captcha and resumes after manual verification
   await job.run();
 
   assert.equal(job.status, "succeeded");
-  assert.ok(job.logs.some((entry) => entry.message.includes("检测到 PayPal 验证码")));
+  assert.ok(job.logs.some((entry) => entry.message.includes("检测到安全验证")));
   assert.ok(browser.evaluations.some((expression) => expression.includes("autoplus-action: captcha-prompt")));
   const captchaPromptIndex = browser.evaluations.findIndex((expression) => expression.includes("autoplus-action: captcha-prompt"));
   const paypalActionAfterCaptcha = browser.evaluations.findIndex((expression, index) => {
@@ -311,7 +319,7 @@ test("AutoPlusJob supports silent manual captcha mode without page prompt", asyn
   await job.run();
 
   assert.equal(job.status, "succeeded");
-  assert.ok(job.logs.some((entry) => entry.message.includes("检测到 PayPal 验证码")));
+  assert.ok(job.logs.some((entry) => entry.message.includes("检测到安全验证")));
   assert.ok(!browser.evaluations.some((expression) => expression.includes("autoplus-action: captcha-prompt")));
 });
 
@@ -335,11 +343,19 @@ test("AutoPlusJob downgrades failed auto captcha mode to manual waiting", async 
     fetch: async (url) => {
       if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
       if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
-      // 火山 API 接口返回 500 以模拟转写或网络异常失败
-      if (String(url).includes("openspeech.bytedance.com")) {
-        return textResponse("internal error", 500);
+      if (String(url).includes("mock.wav")) {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("mock wave body");
+          }
+        };
       }
       throw new Error(`unexpected fetch ${url}`);
+    },
+    exec: (cmd, callback) => {
+      callback(new Error("codex exec error"));
     },
     sleep: async () => {},
   });
@@ -347,7 +363,7 @@ test("AutoPlusJob downgrades failed auto captcha mode to manual waiting", async 
   await job.run();
 
   assert.equal(job.status, "succeeded");
-  assert.ok(job.logs.some((entry) => entry.message.includes("火山语音全自动过码战术失败")));
+  assert.ok(job.logs.some((entry) => entry.message.includes("全自动语音提取方案失败")));
   assert.ok(browser.evaluations.some((expression) => expression.includes("autoplus-action: captcha-prompt")));
 });
 
@@ -672,4 +688,58 @@ test("AutoPlusJob control stop halts execution immediately", async () => {
   // 确保 run() 正常返回，不会因为被停止而对外抛出异常
   await runPromise;
   assert.equal(job.status, "stopped");
+});
+
+test("AutoPlusJob successfully extracts 6 digits using whisper", async () => {
+  const browser = new FakeBrowser();
+  browser.states = [
+    { url: "https://pay.openai.com/c/pay/cs_test_123", isOpenAiCheckout: true },
+    { url: "https://www.paypal.com/checkoutweb/", isPayPal: true, hasCaptcha: true, captchaKind: "datadome" },
+    { url: "https://chatgpt.com/payments/success?session_id=cs_test_123", success: true },
+  ];
+  
+  const job = new AutoPlusJob("captcha-auto-success", {
+    gptSession: JSON.stringify(fullAuthSessionResponse()),
+    captchaMode: "auto",
+  }, {
+    Browser: class extends FakeBrowser {
+      constructor() {
+        super();
+        return browser;
+      }
+    },
+    fetch: async (url) => {
+      if (String(url) === "https://payurl.ark2.cn/api/checkout") return checkoutResponse();
+      if (String(url).includes("meiguodizhi.com")) return jsonResponse({});
+      if (String(url).includes("mock.wav")) {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("mock wave body");
+          }
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    exec: (cmd, callback) => {
+      // 从命令行参数中提取出 wav 的临时路径，并在同名 txt 中写入识别的 6 位数字以模拟真实执行
+      const match = cmd.match(/"([^"]+\.wav)"/);
+      if (match) {
+        const wavPath = match[1];
+        const tempDir = path.dirname(wavPath);
+        const baseName = path.basename(wavPath, ".wav");
+        const txtPath = path.join(tempDir, baseName + ".txt");
+        fs.writeFileSync(txtPath, "识别出的数字发音为 654321");
+      }
+      callback(null, "whisper transcription finished", "");
+    },
+    sleep: async () => {},
+  });
+
+  await job.run();
+
+  assert.equal(job.status, "succeeded");
+  assert.ok(job.logs.some((entry) => entry.message.includes("本地识别成功，解出数字: 654321")));
+  assert.ok(browser.evaluations.some((expression) => expression.includes("654321")));
 });

@@ -17,8 +17,7 @@ const CACHEABLE_FIELDS = [
   "cdpPort",
   "captchaMode",
   "headless",
-  "volcAppId",
-  "volcToken",
+  "whisperPath",
 ];
 
 async function json(url, options) {
@@ -37,7 +36,7 @@ async function loadConfig() {
     else field.value = value || "";
   }
   restoreFormCache();
-  toggleVolcSection();
+  toggleWhisperSection();
 }
 
 function readFormCache() {
@@ -229,27 +228,42 @@ loadConfig().then(loadJobs);
 setInterval(loadJobs, 3000);
 
 const captchaModeSelect = form.elements.captchaMode;
-const volcSection = document.getElementById("volc-config-section");
+const whisperSection = document.getElementById("whisper-config-section");
 
-function toggleVolcSection() {
-  if (captchaModeSelect && volcSection) {
-    volcSection.style.display = captchaModeSelect.value === "auto" ? "block" : "none";
+function toggleWhisperSection() {
+  if (captchaModeSelect && whisperSection) {
+    whisperSection.style.display = captchaModeSelect.value === "auto" ? "block" : "none";
   }
 }
 
 if (captchaModeSelect) {
-  captchaModeSelect.addEventListener("change", toggleVolcSection);
+  captchaModeSelect.addEventListener("change", toggleWhisperSection);
 }
 
-document.getElementById("btn-volc-activate")?.addEventListener("click", () => {
-  window.open("https://console.volcengine.com/speech/new/setting/activate?projectName=default", "_blank");
-});
-document.getElementById("btn-volc-auth")?.addEventListener("click", () => {
-  window.open("https://console.volcengine.com/speech/service/17", "_blank");
-});
-document.getElementById("btn-volc-help")?.addEventListener("click", () => {
-  alert("说明：开通「小模型-录音文件识别」后，进入服务即可获取对应的 AppID 和 Token 等接口认证信息。");
-});
+// Whisper 帮助模态窗逻辑
+const whisperModal = document.getElementById("whisper-modal");
+const btnWhisperHelp = document.getElementById("btn-whisper-help");
+const btnWhisperClose = document.getElementById("whisper-modal-close");
+
+if (btnWhisperHelp && whisperModal) {
+  btnWhisperHelp.addEventListener("click", () => {
+    whisperModal.style.display = "flex";
+  });
+}
+
+if (btnWhisperClose && whisperModal) {
+  btnWhisperClose.addEventListener("click", () => {
+    whisperModal.style.display = "none";
+  });
+}
+
+if (whisperModal) {
+  whisperModal.addEventListener("click", (event) => {
+    if (event.target === whisperModal) {
+      whisperModal.style.display = "none";
+    }
+  });
+}
 
 // 💡 控制按钮事件委托监听
 jobsEl.addEventListener("click", async (event) => {

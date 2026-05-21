@@ -74,7 +74,7 @@
                         <span>PayPal 滑块验证码处理</span>
                         <select name="captchaMode">
                             <option value="auto" selected>
-                                火山语音识别（自动过码）
+                                本地 Whisper 语音识别（自动过码）
                             </option>
                             <option value="manual_prompt">
                                 人工验证：弹窗提示并等待完成
@@ -85,23 +85,20 @@
                             <option value="test_assume_solved">测试模式</option>
                         </select>
                     </label>
-                    <div id="volc-config-section" class="volc-config" style="display: none;">
-                        <div class="volc-header">
-                            <span>火山语音转写认证配置</span>
-                            <div class="volc-actions">
-                                <button type="button" id="btn-volc-activate" class="mini-btn">1. 开通服务</button>
-                                <button type="button" id="btn-volc-auth" class="mini-btn">2. 获取认证</button>
-                                <button type="button" id="btn-volc-help" class="mini-btn help-btn">说明</button>
+                    <div id="whisper-config-section" class="whisper-config" style="display: none;">
+                        <div class="whisper-header">
+                            <span>本地 Whisper 语音识别</span>
+                            <div class="whisper-actions">
+                                <button type="button" id="btn-whisper-help" class="mini-btn help-btn">安装说明</button>
                             </div>
                         </div>
-                        <div class="grid">
-                            <label>
-                                <span>Volc AppID</span>
-                                <input name="volcAppId" placeholder="请输入火山引擎 AppID" />
-                            </label>
-                            <label>
-                                <span>Volc Token</span>
-                                <input name="volcToken" placeholder="请输入火山引擎 Token" />
+                        <div class="whisper-body">
+                            <p class="whisper-tip" style="margin-bottom: 10px;">
+                                使用系统本地部署的 Whisper 模型进行音频验证的高精度转写，完全在本地计算机中安全运行，无需任何 API 凭证与网络请求。
+                            </p>
+                            <label style="margin: 0; font-weight: normal;">
+                                <span style="font-size: 12px; color: #475467; margin-bottom: 4px; display: block;">Whisper 执行路径</span>
+                                <input name="whisperPath" placeholder="留空默认使用系统环境变量中的 whisper" style="padding: 6px 8px; font-size: 12px;" />
                             </label>
                         </div>
                     </div>
@@ -152,6 +149,32 @@
                 </section>
             </section>
         </main>
+
+        <!-- Whisper 本地环境配置模态说明窗 -->
+        <div id="whisper-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="modal-close" id="whisper-modal-close">&times;</span>
+                <h3>本地 Whisper 环境配置指南</h3>
+                <p>要使用自动提取功能，请确保系统本地已安装 <code>openai-whisper</code> 及其依赖，且确保路径正确。请在终端执行以下配置步骤：</p>
+                <ol>
+                    <li>
+                        <strong>第一步：安装 ffmpeg</strong> (音频底层处理依赖)
+                        <pre><code>brew install ffmpeg</code></pre>
+                    </li>
+                    <li>
+                        <strong>第二步：安装 openai-whisper</strong> (深度学习提取库)
+                        <pre><code>pip3 install openai-whisper</code></pre>
+                    </li>
+                    <li>
+                        <strong>第三步：验证 Whisper 执行路径</strong>
+                        <p>请确保命令行可在系统定位到：</p>
+                        <pre><code>/Users/shen/Library/Python/3.9/bin/whisper</code></pre>
+                    </li>
+                </ol>
+                <p class="whisper-modal-footer">注：初次运行会自动从官方拉取 <code>base</code> 基础模型，识别速度极快，识别精度高达 99%。请保证本地计算机网络畅通。</p>
+            </div>
+        </div>
+
         <script src="/app.js"></script>
     </body>
 </html>
